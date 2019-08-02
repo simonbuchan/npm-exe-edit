@@ -1,0 +1,22 @@
+{
+  "name": "@simonbuchan/npm-exe",
+  "version": "1.0.0",
+  "license": "MIT",
+  "main": "out/index.js",
+  "types": "out/index.d.ts",
+  "files": [
+    "src",
+    "out"
+  ],
+  "bin": {
+    "patch-exe": "./out/bin.js"
+  },
+  "scripts": {
+    "compile": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^12.6.9",
+    "typescript": "~3.5.3",
+    "prettier": "^1.18.2"
+  }
+}
