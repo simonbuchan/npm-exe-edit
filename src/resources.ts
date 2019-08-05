@@ -1,17 +1,23 @@
 import * as util from "util";
-import { ExeHeader, resolveRVA, rvaIndices, SectionHeader } from "./header";
 import {
-  AddressRange,
+  ExeHeader,
+  resolveRVA,
+  rvaIndices,
+  SectionHeader,
+  writeSection,
+} from "./header";
+import { AddressRange, FileRange, formatRange, rangeOverlaps } from "./ranges";
+import { getRelocRanges } from "./relocations";
+import {
   align,
   bytes,
   error,
   fileIo,
-  FileRange,
-  formatAddressRange,
-  formatFileRange,
   generateTable,
-  hex,
-  mapGetOrInit, Readable,
+  hex, IO,
+  mapGetOrInit,
+  Readable,
+  Writable,
 } from "./util";
 
 export type ResId = string | number;
@@ -19,10 +25,37 @@ export type ResId = string | number;
 export function getResourceTable(header: ExeHeader, io: Readable) {
   const rva = resolveRVA(header, rvaIndices.resources);
   if (!rva) {
-    return undefined;
+    return { types: new Map() };
   }
-  const data = io.read(rva.file.offset, rva.file.size);
-  return parseResourceSection(data, rva.virtual.address);
+  const data = io.read(rva.file.start, rva.file.size);
+  return parseResourceSection(data, rva.virtual.start);
+}
+
+export function putResourceTable(
+  header: ExeHeader,
+  io: IO,
+  table: ResTable,
+) {
+  const rva = resolveRVA(header, rvaIndices.resources);
+  if (!rva) {
+    return error("Not implemented: section allocation");
+  }
+  for (const range of getRelocRanges(header, io)) {
+    if (rangeOverlaps(rva.virtual, range)) {
+      return error("Resource range overlaps a relocation page?");
+    }
+  }
+  const [data, addressOffsets] = formatResourceSection(table);
+  if (data.length > rva.file.size) {
+    return error("Not implemented: increasing resources size");
+  }
+
+  header.rvaBuffer.writeUInt32LE(data.length, rva.offset + 4);
+
+  const buffer = Buffer.alloc(rva.section.file.size, data);
+  writeSection(io, header, rva.section, buffer, addressOffsets);
+
+  io.write(0, header.buffer);
 }
 
 function resIdCompare(a: ResId, b: ResId): number {
@@ -132,7 +165,7 @@ export function resFind(
   table: ResTable,
   type: ResId,
   name?: ResId,
-): { type: ResId, name: ResId, lang: ResId } | undefined {
+): { type: ResId; name: ResId; lang: ResId } | undefined {
   const typeEntry = table.types.get(type);
   if (!typeEntry) {
     return undefined;
@@ -325,10 +358,10 @@ export function printResourceSectionTable(
           console.log("Entry offset: %O", offset);
         }
         if (virtual) {
-          console.log("Virtual Address: %s", formatAddressRange(virtual));
+          console.log("Virtual Address: %s", formatRange(virtual));
         }
         if (sectionRange) {
-          console.log("   Section Data: %s-%s", formatFileRange(sectionRange));
+          console.log("   Section Data: %s-%s", formatRange(sectionRange));
         }
         console.group("Data (%s):", bytes(data.length));
         for (
@@ -350,7 +383,7 @@ export function printResourceSectionTable(
   }
 }
 
-export function allocResourceSection(table: ResTable) {
+export function formatResourceSection(table: ResTable) {
   let directoryHeaderSize = 16; // root table header size
   let stringAreaSize = 0;
   let dataHeaderAreaSize = 0;

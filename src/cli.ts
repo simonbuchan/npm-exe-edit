@@ -1,9 +1,35 @@
 import fs = require("fs");
 import { Subsystems } from "./header";
-import { BinaryVersion, patchExe } from "./index";
+import { parseBinaryVersion, patchExe } from "./index";
 import { error, fileIo } from "./util";
 
 const options = process.argv.slice(2);
+
+if (getFlag("help")) {
+  console.error(`\
+Usage: exe-edit INPUT_EXE OUTPUT_EXE [options]
+
+Options:
+  [--console]                Change the subsystem to console:
+                              * Opens a command prompt when started from windows.
+                              * Waits for exit when started from a command prompt.
+ | --gui]                    Change the subsystem to GUI:
+                              * No automatic UI created.
+                              * Will immediately return to a command prompt, but
+                                output will still be printed.
+
+  [--icon ICO_PATH           Replace all icon resources with a new icon.
+ | --no-icon]                Remove all icon resources.
+
+  [--file-version VERSION]   Set the binary file version.
+  [--product-version VERSION]
+                             Set the binary product version.
+
+  [--set-version NAME VALUE] Set a version string.
+  [--delete-version NAME]    Delete a version string.
+`);
+  process.exit(0);
+}
 
 const verbose = getFlag("verbose");
 let subsystem;
@@ -65,22 +91,6 @@ try {
   });
 } finally {
   io.close();
-}
-
-function parseBinaryVersion(
-  str: string | undefined,
-): BinaryVersion | undefined {
-  if (!str) {
-    return undefined;
-  }
-  const match = str.match(/^(\d+)(?:\.(\d+)(?:\.(\d+)(?:\.(\d+))))$/);
-  if (!match) {
-    return error(
-      "Invalid binary version string: %O (should be 1-4 numbers separated by '.')",
-      str,
-    );
-  }
-  return (match.slice(1) as unknown) as BinaryVersion;
 }
 
 function getFlag(name: string) {

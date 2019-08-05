@@ -1,6 +1,7 @@
 {
-  "name": "@simonbuchan/npm-exe",
-  "version": "1.0.0",
+  "name": "exe-edit",
+  "description": "Portable parsing and editing of EXE files, including icon and string resources.",
+  "version": "0.1.0",
   "license": "MIT",
   "main": "out/index.js",
   "types": "out/index.d.ts",
@@ -8,9 +9,7 @@
     "src",
     "out"
   ],
-  "bin": {
-    "patch-exe": "./out/bin.js"
-  },
+  "bin":  "./out/cli.js",
   "scripts": {
     "compile": "tsc"
   },

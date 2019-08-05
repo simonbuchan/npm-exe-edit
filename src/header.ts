@@ -1,19 +1,22 @@
 import {
-  addressRange,
   AddressRange,
-  addressRangeContains,
+  addressRange,
+  FileRange,
+  fileRange,
+  formatRange,
+  rangeContains,
+  rangeOverlaps,
+} from "./ranges";
+import {
   align,
   bytes,
   error,
-  fileRange,
-  FileRange,
-  formatAddressRange,
-  formatFileRange,
   generateTable,
   hex,
+  IO,
   Logger,
   Readable,
-  sortedBy,
+  sortedBy, Writable,
 } from "./util";
 
 // Reference:
@@ -23,12 +26,15 @@ export const Subsystems = Object.freeze({
   gui: 2,
   console: 3,
 });
+
 const peOffsetOffset = 0x3c;
 const validPESignature = "PE\0\0";
 const peSignatureSize = 4;
 const coffHeaderSize = 20;
-const pe32Magic = 0x10b;
-const pe32PlusMagic = 0x20b;
+
+export const pe32Magic = 0x10b;
+export const pe32PlusMagic = 0x20b;
+
 export type OptionalMagic = typeof pe32Magic | typeof pe32PlusMagic;
 export const rvaSize = 8;
 export const rvaIndices = Object.freeze({
@@ -65,7 +71,7 @@ const rvaNames = Object.freeze([
   null,
 ] as const);
 export const sectionHeaderSize = 40;
-const sectionCharacteristics = Object.freeze({
+export const SectionCharacteristics = Object.freeze({
   code: 0x20,
   initializedData: 0x40,
   uninitializedData: 0x80,
@@ -168,12 +174,12 @@ export function printHeader(header: ExeHeader, logger: Logger = console) {
 
   for (const { index, virtual } of sortedBy(
     header.rvaTable,
-    rva => rva.virtual.address,
+    rva => rva.virtual.start,
   )) {
     logger.log(
       "RVA %O: Virtual Address: %s",
       rvaNames[index] || index + 1,
-      formatAddressRange(virtual),
+      formatRange(virtual),
     );
   }
 
@@ -185,31 +191,31 @@ export function printHeader(header: ExeHeader, logger: Logger = console) {
     characteristics,
   } of header.sectionTable) {
     logger.group("Section %O: %O", index + 1, name);
-    logger.log("Virtual Address: %s", formatAddressRange(virtual));
-    logger.log("    File Offset: %s", formatFileRange(file));
+    logger.log("Virtual Address: %s", formatRange(virtual));
+    logger.log("    File Offset: %s", formatRange(file));
     logger.group("Characteristics: 0x%s", hex(characteristics, 8));
-    if (characteristics & sectionCharacteristics.code) {
+    if (characteristics & SectionCharacteristics.code) {
       logger.log("Code");
     }
-    if (characteristics & sectionCharacteristics.initializedData) {
+    if (characteristics & SectionCharacteristics.initializedData) {
       logger.log("Initialized Data");
     }
-    if (characteristics & sectionCharacteristics.uninitializedData) {
+    if (characteristics & SectionCharacteristics.uninitializedData) {
       logger.log("Uninitialized Data");
     }
-    if (characteristics & sectionCharacteristics.discardable) {
+    if (characteristics & SectionCharacteristics.discardable) {
       logger.log("Discardable");
     }
-    if (characteristics & sectionCharacteristics.sharableMemory) {
+    if (characteristics & SectionCharacteristics.sharableMemory) {
       logger.log("Memory: Shared");
     }
-    if (characteristics & sectionCharacteristics.executableMemory) {
+    if (characteristics & SectionCharacteristics.executableMemory) {
       logger.log("Memory: Execute");
     }
-    if (characteristics & sectionCharacteristics.readableMemory) {
+    if (characteristics & SectionCharacteristics.readableMemory) {
       logger.log("Memory: Read");
     }
-    if (characteristics & sectionCharacteristics.writableMemory) {
+    if (characteristics & SectionCharacteristics.writableMemory) {
       logger.log("Memory: Write");
     }
     logger.groupEnd();
@@ -240,13 +246,13 @@ export function readHeader(io: Readable): ExeHeader {
   }
 
   const coffRange = fileRange(peOffset + peSignatureSize, coffHeaderSize);
-  const coff = buffer.slice(coffRange.offset, coffRange.end);
+  const coff = buffer.slice(coffRange.start, coffRange.end);
 
   const sectionCount = coff.readUInt16LE(2);
   const optionalSize = coff.readUInt16LE(16);
 
   const optionalRange = fileRange(coffRange.end, optionalSize);
-  const optional = buffer.slice(optionalRange.offset, optionalRange.end);
+  const optional = buffer.slice(optionalRange.start, optionalRange.end);
 
   const optionalMagic = optional.readUInt16LE(0);
 
@@ -269,7 +275,7 @@ export function readHeader(io: Readable): ExeHeader {
     optionalRange.end,
     sectionCount * sectionHeaderSize,
   );
-  const sectionBuffer = buffer.slice(sectionRange.offset, sectionRange.end);
+  const sectionBuffer = buffer.slice(sectionRange.start, sectionRange.end);
 
   const expectedSizeOfHeaders = align(sectionRange.end, fileAlignment);
   if (sizeOfHeaders !== expectedSizeOfHeaders) {
@@ -298,7 +304,7 @@ export function readHeader(io: Readable): ExeHeader {
       const size = rvaBuffer.readUInt32LE(offset + 4);
       return { index, virtual: addressRange(address, size) };
     },
-  ).filter(rva => rva.virtual.address !== 0 || rva.virtual.size !== 0);
+  ).filter(rva => rva.virtual.start !== 0 || rva.virtual.size !== 0);
 
   const sectionTable = generateTable(
     optionalRange.end,
@@ -317,7 +323,7 @@ export function readHeader(io: Readable): ExeHeader {
         buffer.readUInt32LE(offset + 16),
       );
       const characteristics = buffer.readUInt32LE(offset + 36);
-      const adjustment = virtual.address - file.offset;
+      const adjustment = virtual.start - file.start;
 
       return {
         index,
@@ -351,6 +357,8 @@ export function readHeader(io: Readable): ExeHeader {
 }
 
 export interface ResolveRVAResult {
+  readonly index: number;
+  readonly offset: number;
   readonly section: SectionHeader;
   readonly virtual: AddressRange;
   readonly file: FileRange;
@@ -364,13 +372,83 @@ export function resolveRVA(
   if (!rva) {
     return undefined;
   }
+  const offset = rvaSize * index;
   const { virtual } = rva;
   const section = header.sectionTable.find(section =>
-    addressRangeContains(section.virtual, virtual),
+    rangeContains(section.virtual, virtual),
   );
   if (!section) {
     return error("section containing RVA %O not found", rva);
   }
-  const file = fileRange(virtual.address - section.adjustment, virtual.size);
-  return { section, virtual, file };
+  const file = fileRange(virtual.start - section.adjustment, virtual.size);
+  return { index, offset, section, virtual, file };
+}
+
+export function writeSection(
+  io: Writable,
+  header: ExeHeader,
+  existingSection: SectionHeader,
+  buffer: Buffer,
+  relativeAddressOffsets: number[],
+) {
+  // Seems windows doesn't like section gaps, and I want more tests before
+  // I start moving the following .reloc section.
+  if (buffer.length !== existingSection.file.size) {
+    return error("section rezising not supported yet");
+  }
+  const newVirtual = addressRange(existingSection.virtual.start, buffer.length);
+  const newFile = fileRange(
+    existingSection.file.start,
+    align(buffer.length, header.fileAlignment),
+  );
+
+  //
+  // for (const section of header.sectionTable) {
+  //   if (section !== existingSection) {
+  //     if (rangeOverlaps(section.virtual, newVirtual)) {
+  //       return error(
+  //         "Not implemented: Resource section size increase would overlap address of section %O",
+  //         section.name,
+  //       );
+  //     }
+  //     if (rangeOverlaps(section.file, newFile)) {
+  //       return error(
+  //         "Not implemented: Resource section size increase would overlap file data of section %O",
+  //         section.name,
+  //       );
+  //     }
+  //   }
+  // }
+
+  for (const offset of relativeAddressOffsets) {
+    buffer.writeUInt32LE(
+      newVirtual.start + buffer.readUInt32LE(offset),
+      offset,
+    );
+  }
+
+  // header.rvaBuffer.writeUInt32LE(
+  //   newVirtual.size,
+  //   rvaIndices.resources * rvaSize + 4,
+  // );
+
+  // const sectionOffset = existingSection.index * sectionHeaderSize;
+  // header.sectionBuffer.writeUInt32LE(newVirtual.size, sectionOffset + 8);
+  // header.sectionBuffer.writeUInt32LE(newFile.size, sectionOffset + 16);
+
+  // logger.log(pad(" final ", 80, "="));
+  // printResourceSectionTable(parseResourceSection(buffer, section.virtualAddress), section);
+
+  io.write(newFile.start, buffer);
+
+  // This computation is a bit bizarre, but seems to give the same value
+  // as microsoft puts.
+  // let newSizeOfInitializedData = 0;
+  // for (const section of header.sectionTable) {
+  //   const virtual = section === existingSection ? newVirtual : section.virtual;
+  //   if (section.characteristics & SectionCharacteristics.initializedData) {
+  //     newSizeOfInitializedData += align(virtual.size, header.fileAlignment);
+  //   }
+  // }
+  // header.optional.writeUInt32LE(newSizeOfInitializedData, 8);
 }

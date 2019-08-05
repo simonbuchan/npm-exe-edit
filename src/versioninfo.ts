@@ -14,13 +14,32 @@ import {
   error,
   Logger,
   readNullTerminatedUTF16,
-  verifyFormat,
+  StringMapLike,
+  stringMapLikeEntries,
 } from "./util";
 
 export type BinaryVersion = readonly [number, number?, number?, number?];
 
-const fixedFileInfoSize = 52;
-const fixedFileInfoSignature = 0xfeef04bd;
+export const fixedFileInfoSize = 52;
+export const fixedFileInfoSignature = 0xfeef04bd;
+export const fixedFileVersionOffset = 8;
+export const fixedProductVersionOffset = 16;
+/*
+  00: DWORD dwSignature;
+  04: DWORD dwStrucVersion;
+  08: DWORD dwFileVersionMS;
+  12: DWORD dwFileVersionLS;
+  16: DWORD dwProductVersionMS;
+  20: DWORD dwProductVersionLS;
+  24: DWORD dwFileFlagsMask;
+  28: DWORD dwFileFlags;
+  32: DWORD dwFileOS;
+  36: DWORD dwFileType;
+  40: DWORD dwFileSubtype;
+  44: DWORD dwFileDateMS;
+  48: DWORD dwFileDateLS;
+  52:
+*/
 
 export function readVersionInfoResource(
   table: ResTable,
@@ -37,7 +56,7 @@ export function readVersionInfoResource(
 export interface UpdateVersionInfoOptions {
   readonly fileVersion?: BinaryVersion;
   readonly productVersion?: BinaryVersion;
-  readonly strings?: ReadonlyMap<string, string | null>;
+  readonly strings?: StringMapLike<string | null>;
 }
 
 export function updateVersionInfo(
@@ -58,14 +77,23 @@ export function updateVersionInfo(
   let updated = false;
   if (options.fileVersion) {
     updated = true;
-    writeBinaryVersion(block.value as Buffer, 8, options.fileVersion);
+    writeBinaryVersion(
+      block.value as Buffer,
+      fixedFileVersionOffset,
+      options.fileVersion,
+    );
   }
   if (options.productVersion) {
     updated = true;
-    writeBinaryVersion(block.value as Buffer, 16, options.productVersion);
+    writeBinaryVersion(
+      block.value as Buffer,
+      fixedProductVersionOffset,
+      options.productVersion,
+    );
   }
   if (options.strings) {
-    for (const [key, value] of options.strings) {
+    const entries = stringMapLikeEntries(options.strings);
+    for (const [key, value] of entries) {
       updated = true;
       if (value !== null) {
         setVersionString(block, key, value);
@@ -250,12 +278,12 @@ export function printVersionInfo(logger: Logger, block: InputVersionInfoBlock) {
     logger.group("%s: VS_FIXEDFILEINFO", block.key);
     printBinaryVersion(
       "   File Version",
-      readBinaryVersion(block.value, 8),
+      readBinaryVersion(block.value, fixedFileVersionOffset),
       logger,
     );
     printBinaryVersion(
       "Product Version",
-      readBinaryVersion(block.value, 16),
+      readBinaryVersion(block.value, fixedProductVersionOffset),
       logger,
     );
   } else if (block.value.length) {
@@ -330,4 +358,20 @@ export function formatVersionInfo(block: InputVersionInfoBlock) {
   }
 
   return result;
+}
+
+export function parseBinaryVersion(
+  str: string | undefined,
+): BinaryVersion | undefined {
+  if (!str) {
+    return undefined;
+  }
+  const parts = str.split(".").map(x => parseInt(x, 10));
+  if (parts.length > 4 || !parts.every(x => 0 <= x && x < 0xffff)) {
+    return error(
+      "Invalid binary version string: %O. Should be 1-4 numbers between 0 and 65535 separated by '.'",
+      str,
+    );
+  }
+  return (parts as unknown) as BinaryVersion;
 }

@@ -15,24 +15,6 @@ export function pad(string: string, maxLength: number, fillString: string) {
     .padEnd(maxLength, fillString);
 }
 
-export function formatAddressRange(range: AddressRange) {
-  return util.format(
-    "%s-%s (%s)",
-    hex(range.address, 8),
-    hex(range.end, 8),
-    bytes(range.size),
-  );
-}
-
-export function formatFileRange(range: FileRange) {
-  return util.format(
-    "%s-%s",
-    hex(range.offset, 8),
-    hex(range.end, 8),
-    bytes(range.size),
-  );
-}
-
 export function hex(value: any, size = 0) {
   return typeof value === "number"
     ? value.toString(16).padStart(size, "0")
@@ -87,26 +69,6 @@ export function error(messageFormat: string, ...args: any[]): never {
   throw new Error(message);
 }
 
-export interface FileRange {
-  readonly offset: number;
-  readonly end: number;
-  readonly size: number;
-}
-
-export function fileRange(offset: number, size: number): FileRange {
-  return Object.freeze({ offset, end: offset + size, size });
-}
-
-export interface AddressRange {
-  readonly address: number;
-  readonly end: number;
-  readonly size: number;
-}
-
-export function addressRange(address: number, size: number): AddressRange {
-  return Object.freeze({ address, end: address + size, size });
-}
-
 export interface Readable {
   read(
     position: number,
@@ -142,17 +104,6 @@ export const nullLogger = Object.freeze({
   group() {},
   groupEnd() {},
 });
-
-function fileRangeContains(outer: FileRange, inner: FileRange): boolean {
-  return outer.offset <= inner.offset && inner.end <= outer.end;
-}
-
-export function addressRangeContains(
-  outer: AddressRange,
-  inner: AddressRange,
-): boolean {
-  return outer.address <= inner.address && inner.end <= outer.end;
-}
 
 function generate<T>(count: number, generator: (index: number) => T) {
   const results: T[] = [];
@@ -220,4 +171,14 @@ export function readNullTerminatedUTF16(
     offset = align(offset, alignment);
   }
   return [value, offset] as const;
+}
+
+export type StringMapLike<V> =
+  | { readonly [key: string]: V }
+  | Iterable<[string, V]>;
+
+export function stringMapLikeEntries<V>(map: StringMapLike<V>): Iterable<[string, V]> {
+  return Symbol.iterator in map
+    ? (map as Iterable<[string, V]>)
+    : Object.entries(map);
 }
