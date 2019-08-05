@@ -1,7 +1,7 @@
 {
   "name": "exe-edit",
   "description": "Portable parsing and editing of EXE files, including icon and string resources.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,14 +13,14 @@
     "src",
     "out"
   ],
-  "bin":  "./out/cli.js",
+  "bin": "./out/cli.js",
   "scripts": {
     "prepublish": "yarn compile",
     "compile": "tsc"
   },
   "devDependencies": {
     "@types/node": "^12.6.9",
-    "typescript": "~3.5.3",
-    "prettier": "^1.18.2"
+    "prettier": "^1.18.2",
+    "typescript": "~3.5.3"
   }
 }
