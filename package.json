@@ -3,6 +3,10 @@
   "description": "Portable parsing and editing of EXE files, including icon and string resources.",
   "version": "0.1.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonbuchan/npm-exe-edit.git"
+  },
   "main": "out/index.js",
   "types": "out/index.d.ts",
   "files": [
@@ -11,6 +15,7 @@
   ],
   "bin":  "./out/cli.js",
   "scripts": {
+    "prepublish": "yarn compile",
     "compile": "tsc"
   },
   "devDependencies": {
