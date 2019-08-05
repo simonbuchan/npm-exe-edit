@@ -50,7 +50,7 @@ export function readVersionInfoResource(
   if (!entry) {
     return undefined;
   }
-  return readVersionInfoBlock(entry.data);
+  return parseVersionInfoBlock(entry.data);
 }
 
 export interface UpdateVersionInfoOptions {
@@ -227,7 +227,7 @@ export interface InputVersionInfoBlock {
   readonly children: readonly InputVersionInfoBlock[];
 }
 
-interface ReadVersionInfoBlock {
+export interface ReadVersionInfoBlock {
   readonly offset: number;
   readonly end: number;
   readonly key: string;
@@ -235,7 +235,7 @@ interface ReadVersionInfoBlock {
   readonly children: VersionInfoBlock[];
 }
 
-function readVersionInfoBlock(
+export function parseVersionInfoBlock(
   buffer: Buffer,
   offset = 0,
 ): ReadVersionInfoBlock {
@@ -262,7 +262,7 @@ function readVersionInfoBlock(
   let childOffset = align(valueEnd, 4);
   const children = [];
   while (childOffset < end) {
-    const child = readVersionInfoBlock(buffer, childOffset);
+    const child = parseVersionInfoBlock(buffer, childOffset);
     childOffset = align(child.end, 4);
     children.push(child);
   }
@@ -333,13 +333,15 @@ export function formatVersionInfo(block: InputVersionInfoBlock) {
   const keyEnd = align(6 + keySize, 4);
   const type = Buffer.isBuffer(block.value) ? 0 : 1;
   const valueSize =
-    type === 0 ? block.value.length : block.value.length * 2 + 2;
-  let offset = align(keyEnd + valueSize, 4);
-  let length = offset;
+    type === 0 || !block.value.length
+      ? block.value.length
+      : block.value.length * 2 + 2;
+  const selfLength = keyEnd + valueSize;
+  let length = selfLength;
 
   const children = block.children.map(formatVersionInfo);
   for (const child of children) {
-    length += child.length;
+    length = align(length, 4) + child.length;
   }
   const result = Buffer.alloc(length);
   result.writeUInt16LE(length, 0);
@@ -352,9 +354,10 @@ export function formatVersionInfo(block: InputVersionInfoBlock) {
     result.write(block.value as string, keyEnd, "utf16le");
   }
 
+  let offset = align(selfLength, 4);
   for (const child of children) {
     child.copy(result, offset);
-    offset += child.length;
+    offset = align(offset + child.length, 4);
   }
 
   return result;
